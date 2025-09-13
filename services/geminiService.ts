@@ -7,7 +7,24 @@ if (!process.env.API_KEY) {
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-const gameSetupSchema = {
+// Schema for the first call: generating the scene
+const sceneGenerationSchema = {
+    type: Type.OBJECT,
+    properties: {
+        sabotage: { 
+            type: Type.STRING,
+            description: "A creative, funny, and specific office sabotage scenario caused by the villain, in Korean. This text must be suitable for displaying as an alert.",
+        },
+        sabotageImagePrompt: {
+            type: Type.STRING,
+            description: "A detailed prompt in English for an image generation AI. The prompt must describe a cute, bright retro pixel art scene depicting the sabotage. It should feature 4-5 distinct and expressive office worker characters reacting to the situation. If the sabotage involves specific text (like a changed folder name), the prompt MUST instruct the AI to include that EXACT Korean text in the image."
+        }
+    },
+    required: ["sabotage", "sabotageImagePrompt"],
+};
+
+// Schema for the second call: extracting characters from the generated image
+const characterExtractionSchema = {
     type: Type.OBJECT,
     properties: {
         characters: {
@@ -15,28 +32,23 @@ const gameSetupSchema = {
             items: {
                 type: Type.OBJECT,
                 properties: {
-                    name: { type: Type.STRING },
-                    position: { type: Type.STRING },
-                    personality: { type: Type.STRING },
+                    name: { type: Type.STRING, description: "A unique Korean name for the character." },
+                    position: { type: Type.STRING, description: "The character's job position." },
+                    personality: { 
+                        type: Type.STRING, 
+                        description: "A very short, one-phrase personality description in Korean (e.g., '늘 의욕이 넘치는', '매사에 시니컬한')." 
+                    },
                     isVillain: { type: Type.BOOLEAN },
-                    imageUrl: { 
+                    imageDescription: { 
                         type: Type.STRING,
-                        description: "A simple, one-or-two-word English description for a pixel art avatar (e.g., 'Smiling Woman', 'Grumpy Cat', 'Tired Manager'). This will be used as a seed for an image generation URL."
+                        description: "A detailed visual description in English of this specific character, based on their appearance in the provided image. This will be used to generate a unique portrait avatar. Describe their hair, expression, clothing, and any distinguishing features. e.g., 'A pixel art portrait of the woman with orange hair in a bun and glasses, looking shocked, wearing a yellow blouse.'"
                     },
                 },
-                required: ["name", "position", "personality", "isVillain", "imageUrl"],
+                required: ["name", "position", "personality", "isVillain", "imageDescription"],
             },
         },
-        sabotage: { 
-            type: Type.STRING,
-            description: "A creative, funny, and specific office sabotage scenario caused by the villain, in Korean.",
-        },
-        sabotageIconSeed: {
-            type: Type.STRING,
-            description: "A single, simple English noun that represents the sabotage, to be used as a seed for a simple icon. For example, if the sabotage is 'spilled coffee', a good seed would be 'coffee'. If it's 'replaced the CEO's portrait with a cat', a good seed would be 'cat'. If it's 'changed the ringtone to a trot song', a good seed would be 'music'."
-        }
     },
-    required: ["characters", "sabotage", "sabotageIconSeed"],
+    required: ["characters"],
 };
 
 const characterResponseSchema = {
@@ -75,35 +87,102 @@ const voteAndConfessionSchema = {
 };
 
 
-export const setupGame = async (): Promise<{ characters: Omit<Character, 'status' | 'isPlayer' | 'votes'>[]; sabotage: string; sabotageIconSeed: string; }> => {
-    const prompt = `
-        You are the game master for a Korean office-themed mafia game called '오피스 빌런' (Office Villain). Your goal is to create a fun and engaging scenario.
-        1.  **Create 5 unique characters:**
-            *   They must be distinct and memorable Korean office workers.
-            *   Give each a Korean name, a specific job position (e.g., 'UX/UI 디자이너', '재무팀장'), and a strong, funny persona.
-            *   For each character, provide a simple, one-or-two-word English description for a pixel art avatar (e.g., 'Smiling Woman', 'Grumpy Cat', 'Tired Manager') in the 'imageUrl' field. This will be used as a seed for an image.
-            *   **Persona examples**: A super-caffeinated, overly-enthusiastic intern; a cynical, close-to-retirement manager who has seen it all; a tech wizard who only speaks in jargon; a bubbly HR person who loves team-building exercises. Be creative!
-        2.  **Secretly designate ONE as the 'Villain'**: Set 'isVillain' to true for one character. The others must be false.
-        3.  **Create a realistic and passive-aggressive office sabotage scenario**: The scenario must be in Korean. It should reflect something a real "office villain" might do to subtly annoy colleagues or disrupt work.
-            *   Also provide a single, simple English noun for a simple icon representing the sabotage in the 'sabotageIconSeed' field.
-            *   **Examples**: Sabotage: "사내 익명 게시판에 누군가 '퇴사하면 모든 게 편해져요'라는 글을 올렸습니다." -> sabotageIconSeed: "chat". Sabotage: "중요한 클라이언트 미팅 직전, 회의실 예약이 '팀 단합의 시간'이라는 이름으로 갑자기 변경되었습니다." -> sabotageIconSeed: "calendar". Sabotage: "사무실 공용 냉장고에 있던 모든 음료수 라벨이 '맹물'로 교체되었습니다." -> sabotageIconSeed: "water".
-        4.  Return the result in a valid JSON format that matches the provided schema. Do not include any text outside the JSON structure.
-    `;
-
+export const setupGame = async (): Promise<{ characters: Omit<Character, 'status' | 'isPlayer' | 'votes'>[]; sabotage: string; sabotageImageUrl: string; }> => {
     try {
-        const response = await ai.models.generateContent({
+        // Part 1: Generate the sabotage scenario and the prompt for its image.
+        const scenePrompt = `
+            You are the game master for '오피스 빌런' (Office Villain). Your goal is to create a fun and engaging scenario.
+            1.  **Create a realistic and passive-aggressive office sabotage scenario**: The scenario must be in Korean. It should reflect something a real "office villain" might do. The description must be from a neutral, third-person perspective, like an alert, using phrases like '누군가' (someone).
+                *   **Examples**: "사내 익명 게시판에 누군가 '퇴사하면 모든 게 편해져요'라는 글을 올렸습니다.", "팀 프로젝트 마감 직전, 공용 클라우드 드라이브의 모든 폴더 이름이 '여긴 어디? 나는 누구?'로 바뀌어 버렸습니다."
+            2.  **Create a detailed Image Prompt for the scenario**: Based on the sabotage scenario, create a concise, descriptive prompt in English for an image generation AI.
+                *   **Style:** The style must be cute and bright retro pixel art, featuring cute pixel characters.
+                *   **Content:** The prompt must describe a scene with 4 to 5 distinct and expressive Korean office worker characters reacting to the sabotage.
+                *   **Text Integration:** This is critical. If the sabotage involves specific text (like a bulletin board post or a changed folder name), the prompt MUST instruct the AI to include that EXACT Korean text in the image. For example, for "폴더 이름이 '여긴 어디? 나는 누구?'로 바뀌었습니다", the prompt MUST contain instructions like "The screens prominently display the Korean text '여긴 어디? 나는 누구?'".
+            3.  Return the result in a valid JSON format.
+        `;
+
+        const sceneGenResponse = await ai.models.generateContent({
             model: "gemini-2.5-flash",
-            contents: prompt,
+            contents: scenePrompt,
             config: {
                 responseMimeType: "application/json",
-                responseSchema: gameSetupSchema,
+                responseSchema: sceneGenerationSchema,
+            },
+        });
+        const sceneData = JSON.parse(sceneGenResponse.text);
+        const { sabotage, sabotageImagePrompt } = sceneData;
+
+        // Part 2: Generate the main sabotage image.
+        const sabotageImageResponse = await ai.models.generateImages({
+            model: 'imagen-4.0-generate-001',
+            prompt: sabotageImagePrompt,
+            config: {
+              numberOfImages: 1,
+              outputMimeType: 'image/png',
+              aspectRatio: '1:1',
+            },
+        });
+        const sabotageImageBytes = sabotageImageResponse.generatedImages[0].image.imageBytes;
+        const sabotageImageUrl = `data:image/png;base64,${sabotageImageBytes}`;
+        
+        // Part 3: Use the generated image to create characters.
+        const characterExtractionPrompt = `
+            You are a game master for 'Office Villain'. An incident has occurred, and this image depicts the scene. Your task is to define the characters based on the people in this image.
+            1.  **Analyze the Image:** Carefully observe each distinct character in the provided image.
+            2.  **Create Characters:** For each character you identify, create the following:
+                *   A unique Korean name and a plausible job position.
+                *   A **very short, one-phrase personality description** in Korean (e.g., '늘 의욕이 넘치는', '매사에 시니컬한', '농담을 좋아하는'). Keep it concise for readability.
+                *   A detailed 'imageDescription' in English. This must be a visual description of THAT specific character from the image, to be used for generating a separate portrait. Describe their appearance (hair, clothes, expression) accurately.
+            3.  **Assign the Villain:** Secretly designate ONLY ONE of these characters as the 'Villain' by setting 'isVillain' to true. All others must be false.
+            4.  **Format as JSON:** Return a JSON object that strictly follows the provided schema. Ensure you identify all main characters in the image.
+        `;
+
+        const imagePart = {
+            inlineData: {
+                mimeType: 'image/png',
+                data: sabotageImageBytes,
+            },
+        };
+
+        const characterGenResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: { parts: [imagePart, { text: characterExtractionPrompt }] },
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: characterExtractionSchema,
             },
         });
 
-        const jsonString = response.text;
-        const data = JSON.parse(jsonString);
+        const characterData = JSON.parse(characterGenResponse.text);
+        const extractedCharacters = characterData.characters;
+
+        // Part 4: Generate individual character portraits based on the descriptions.
+        const characterImagePromises = extractedCharacters.map((char: any) => {
+            const characterPrompt = `A cute, expressive, retro pixel art portrait of a Korean office worker. ${char.imageDescription}. Bust shot, plain background, 1:1 aspect ratio.`;
+            return ai.models.generateImages({
+                model: 'imagen-4.0-generate-001',
+                prompt: characterPrompt,
+                config: {
+                    numberOfImages: 1,
+                    outputMimeType: 'image/png',
+                    aspectRatio: '1:1',
+                }
+            });
+        });
+
+        const characterImageResponses = await Promise.all(characterImagePromises);
         
-        return { characters: data.characters, sabotage: data.sabotage, sabotageIconSeed: data.sabotageIconSeed };
+        const charactersWithImages = extractedCharacters.map((char: any, index: number) => {
+            const { imageDescription, ...restOfChar } = char;
+            const base64ImageBytes: string = characterImageResponses[index].generatedImages[0].image.imageBytes;
+            return {
+                ...restOfChar,
+                imageUrl: `data:image/png;base64,${base64ImageBytes}`
+            };
+        });
+
+        return { characters: charactersWithImages, sabotage, sabotageImageUrl };
+
     } catch (error) {
         console.error("Error setting up game:", error);
         throw new Error("Failed to initialize the game with the AI. Please check your API key and network connection.");

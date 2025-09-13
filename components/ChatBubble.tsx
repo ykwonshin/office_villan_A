@@ -21,7 +21,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({ message, playerCharacterName })
                 <img 
                     src={imageUrl} 
                     alt="Sabotage event" 
-                    className="w-32 h-32 rounded-lg bg-slate-200 border-4 border-slate-300 object-cover"
+                    className="w-full max-w-sm mx-auto rounded-xl bg-slate-200 border-8 border-slate-300 object-cover shadow-lg"
                 />
             </div>
         )}

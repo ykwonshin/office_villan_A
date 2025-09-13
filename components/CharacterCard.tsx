@@ -29,7 +29,7 @@ const CharacterCard: React.FC<CharacterCardProps> = ({ character, onVote, isVoti
       />
       <h3 className="font-bold text-lg text-slate-800">{character.name}</h3>
       <p className="text-sm text-slate-600">{character.position}</p>
-      <p className="text-xs text-slate-500 mt-2 italic">"{character.personality}"</p>
+      <p className="text-sm text-slate-500 mt-2">{character.personality}</p>
       {isVotedOut && (
         <div className="mt-3">
             <span className="text-red-500 font-bold text-sm px-3 py-1 bg-red-100 rounded-full">해고됨 (FIRED)</span>

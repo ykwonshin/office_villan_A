@@ -38,32 +38,23 @@ const App: React.FC = () => {
         setMessages([{ sender: 'system', text: '새로운 오피스 빌런 사건을 접수하는 중입니다...' }]);
         
         try {
-            const { characters: newCharactersData, sabotage: newSabotage, sabotageIconSeed } = await setupGame();
+            const { characters: newCharactersData, sabotage: newSabotage, sabotageImageUrl } = await setupGame();
 
             const playerIndex = Math.floor(Math.random() * newCharactersData.length);
-            const player = {
-                ...newCharactersData[playerIndex],
-                status: 'active' as const,
-                isPlayer: true,
-                votes: 0,
-                imageUrl: `https://api.dicebear.com/8.x/pixel-art/svg?seed=${encodeURIComponent(newCharactersData[playerIndex].imageUrl)}`
-            };
-            setPlayerCharacter(player);
-
+            
             const newCharacters: Character[] = newCharactersData.map((c, index) => ({
                 ...c,
                 status: 'active',
                 isPlayer: index === playerIndex,
                 votes: 0,
-                imageUrl: `https://api.dicebear.com/8.x/pixel-art/svg?seed=${encodeURIComponent(c.imageUrl)}`
             }));
-            
+
+            const player = newCharacters.find(c => c.isPlayer)!;
+            setPlayerCharacter(player);
             setCharacters(newCharacters);
             setSabotage(newSabotage);
             const gameVillain = newCharacters.find(c => c.isVillain) || null;
             setVillain(gameVillain);
-
-            const fullSabotageImageUrl = `https://api.dicebear.com/8.x/icons/svg?seed=${encodeURIComponent(sabotageIconSeed)}`;
 
             const initialMessages: Message[] = [
                 { sender: 'system', text: `당신은 이 게임의 주인공, ${player.name}입니다. 하지만 당신이 빌런일지, 아닐지는 아직 아무도 모릅니다...`, isPrivate: true },
@@ -71,7 +62,7 @@ const App: React.FC = () => {
                     sender: 'system', 
                     text: `🚨긴급🚨\n\n"${newSabotage}"\n\n사건이 발생했습니다! 범인은 이 안에 있습니다.`, 
                     isSpecial: true,
-                    imageUrl: fullSabotageImageUrl,
+                    imageUrl: sabotageImageUrl,
                 },
                 { sender: 'system', text: '동료들과 대화하여 오피스 빌런을 찾아내세요.' }
             ];
