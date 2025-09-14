@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { setupGame, getCharacterResponses, getVoteAndConfession } from './services/geminiService';
+import { generateGameSetupText, generateSabotageImage, generateCharacterPortraits, getCharacterResponses, getVoteAndConfession } from './services/geminiService';
 import type { Character, Message, GameState } from './types';
 import CharacterCard from './components/CharacterCard';
 import ChatBubble from './components/ChatBubble';
@@ -9,6 +9,15 @@ const LoadingSpinner: React.FC = () => (
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
     </div>
 );
+
+const loadingTexts = [
+    'CCTV 확인 중... (실은 없음)',
+    '동료들의 알리바이 위조 중...',
+    '커피 머신에서 지문 채취 중...',
+    '탕비실 간식 재고 파악 중...',
+    '범인이 남긴 코드 주석 분석 중...',
+    '보고서용 폰트 고르는 중...',
+];
 
 const App: React.FC = () => {
     const [gameState, setGameState] = useState<GameState>('welcome');
@@ -20,6 +29,7 @@ const App: React.FC = () => {
     const [userInput, setUserInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [loadingMessage, setLoadingMessage] = useState<string>(loadingTexts[0]);
 
     const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -31,6 +41,21 @@ const App: React.FC = () => {
         scrollToBottom();
     }, [messages]);
 
+    useEffect(() => {
+        if (gameState === 'setting_up') {
+            const interval = setInterval(() => {
+                setLoadingMessage(currentMessage => {
+                    const currentIndex = loadingTexts.indexOf(currentMessage);
+                    const nextIndex = (currentIndex + 1) % loadingTexts.length;
+                    return loadingTexts[nextIndex];
+                });
+            }, 1800);
+
+            return () => clearInterval(interval);
+        }
+    }, [gameState]);
+
+
     const handleStartGame = useCallback(async () => {
         setIsLoading(true);
         setError(null);
@@ -38,16 +63,22 @@ const App: React.FC = () => {
         setMessages([{ sender: 'system', text: '새로운 오피스 빌런 사건을 접수하는 중입니다...' }]);
         
         try {
-            const { characters: newCharactersData, sabotage: newSabotage, sabotageImageUrl } = await setupGame();
+            // Step 1: Get text data first (Fast)
+            const { characters: charactersWithPrompts, sabotage: newSabotage, sabotageImagePrompt } = await generateGameSetupText();
 
-            const playerIndex = Math.floor(Math.random() * newCharactersData.length);
+            // Step 2: Immediately set up game state and render UI
+            const playerIndex = Math.floor(Math.random() * charactersWithPrompts.length);
             
-            const newCharacters: Character[] = newCharactersData.map((c, index) => ({
-                ...c,
-                status: 'active',
-                isPlayer: index === playerIndex,
-                votes: 0,
-            }));
+            const newCharacters: Character[] = charactersWithPrompts.map((c, index) => {
+                const { portraitPrompt, ...restOfChar } = c;
+                return {
+                    ...restOfChar,
+                    status: 'active',
+                    isPlayer: index === playerIndex,
+                    votes: 0,
+                    imageUrl: null, // Image is null initially
+                };
+            });
 
             const player = newCharacters.find(c => c.isPlayer)!;
             setPlayerCharacter(player);
@@ -57,22 +88,42 @@ const App: React.FC = () => {
             setVillain(gameVillain);
 
             const initialMessages: Message[] = [
-                { sender: 'system', text: `당신은 이 게임의 주인공, ${player.name}입니다. 하지만 당신이 빌런일지, 아닐지는 아직 아무도 모릅니다...`, isPrivate: true },
+                { sender: 'system', text: `당신은 이 게임의 주인공, ${player.name}입니다.`, isPrivate: true },
                 { 
                     sender: 'system', 
                     text: `🚨긴급🚨\n\n"${newSabotage}"\n\n사건이 발생했습니다! 범인은 이 안에 있습니다.`, 
                     isSpecial: true,
-                    imageUrl: sabotageImageUrl,
+                    imageUrl: null, // Image is null initially
                 },
                 { sender: 'system', text: '동료들과 대화하여 오피스 빌런을 찾아내세요.' }
             ];
             setMessages(initialMessages);
+            
+            // Go to discussion, user can now interact
             setGameState('discussion');
+            setIsLoading(false); 
+
+            // Step 3: Generate images in the background (Slow)
+            generateSabotageImage(sabotageImagePrompt).then(sabotageImageUrl => {
+                if (sabotageImageUrl) {
+                    setMessages(prev => prev.map(msg => 
+                        msg.isSpecial ? { ...msg, imageUrl: sabotageImageUrl } : msg
+                    ));
+                }
+            });
+            
+            const portraitPrompts = charactersWithPrompts.map(c => c.portraitPrompt);
+            generateCharacterPortraits(portraitPrompts).then(imageUrls => {
+                 setCharacters(prev => prev.map((char, index) => ({
+                    ...char,
+                    imageUrl: imageUrls[index],
+                })));
+            });
+
         } catch (e) {
             const errorMessage = e instanceof Error ? e.message : "An unknown error occurred.";
             setError(errorMessage);
             setGameState('welcome');
-        } finally {
             setIsLoading(false);
         }
     }, []);
@@ -99,7 +150,7 @@ const App: React.FC = () => {
     };
 
     const handlePlayerVote = async (votedName: string) => {
-        if (gameState !== 'voting' || !playerCharacter) return;
+        if (gameState !== 'voting' || !playerCharacter || isLoading) return;
 
         setGameState('reveal');
         setIsLoading(true);
@@ -109,43 +160,70 @@ const App: React.FC = () => {
             const playerVote = { voter: playerCharacter.name, votedFor: votedName };
             const { votes: aiVotes, confession } = await getVoteAndConfession(characters, sabotage, messages, playerVote);
             
-            const allVotes = [playerVote, ...aiVotes];
-            const voteTally: { [key: string]: number } = {};
-            characters.forEach(c => { voteTally[c.name] = 0; });
+            // Validate AI votes to prevent duplicates or votes from inactive/player characters.
+            const activeAiVoters = new Set(characters.filter(c => c.status === 'active' && !c.isPlayer).map(c => c.name));
+            const seenVoters = new Set<string>();
+
+            const validatedAiVotes = aiVotes.filter((vote: { voter: string; votedFor: string }) => {
+                // Ensure the voter is an active AI and hasn't voted yet
+                if (activeAiVoters.has(vote.voter) && !seenVoters.has(vote.voter)) {
+                    seenVoters.add(vote.voter);
+                    return true;
+                }
+                return false;
+            });
+
+            const allVotes = [playerVote, ...validatedAiVotes];
+
+            const currentTally: { [key: string]: number } = {};
+            characters.forEach(c => { currentTally[c.name] = 0; });
             
-            // Simulate vote reveal
+            // Simulate vote reveal with correct animation
             for (const vote of allVotes) {
                 await new Promise(res => setTimeout(res, 600));
-                voteTally[vote.votedFor] = (voteTally[vote.votedFor] || 0) + 1;
-                setCharacters(prev => prev.map(c => ({...c, votes: voteTally[c.name] })));
+                currentTally[vote.votedFor] = (currentTally[vote.votedFor] || 0) + 1;
+                setCharacters(prev => prev.map(c => ({...c, votes: currentTally[c.name] || 0 })));
                 setMessages(prev => [...prev, { sender: 'system', text: `${vote.voter}님이 ${vote.votedFor}님을 지목했습니다.` }]);
             }
             
             await new Promise(res => setTimeout(res, 1500));
 
             // Determine result
-            let maxVotes = 0;
-            let votedOutName = '';
-            for (const name in voteTally) {
-                if (voteTally[name] > maxVotes) {
-                    maxVotes = voteTally[name];
-                    votedOutName = name;
-                }
-            }
-            
-            const votedOutCharacter = characters.find(c => c.name === votedOutName);
+            const voteCounts = Object.values(currentTally);
+            const maxVotes = Math.max(0, ...voteCounts);
+            const candidatesForElimination = Object.keys(currentTally).filter(name => currentTally[name] === maxVotes && maxVotes > 0);
+            const isPlayerTheVillain = playerCharacter.isVillain;
 
-            if (votedOutCharacter) {
+            if (candidatesForElimination.length > 1) {
+                // TIE -> Villain wins
+                setMessages(prev => [...prev, { 
+                    sender: 'system', 
+                    text: `투표가 동점으로 끝났습니다! 빌런을 특정하지 못했으므로, 시민들의 패배입니다...`,
+                    isSpecial: true 
+                }]);
+                await new Promise(res => setTimeout(res, 2000));
+                
+                setMessages(prev => [
+                    ...prev,
+                    { sender: 'system', text: `진짜 빌런은 ${villain?.name}이었습니다!`, isSpecial: true },
+                    { sender: villain!.name, text: `[자백] ${confession}` }
+                ]);
+                setGameState(isPlayerTheVillain ? 'game_over_win' : 'game_over_loss');
+
+            } else if (candidatesForElimination.length === 1) {
+                // ONE person voted out
+                const votedOutName = candidatesForElimination[0];
+                const votedOutCharacter = characters.find(c => c.name === votedOutName)!;
+                
                 setCharacters(prev => prev.map(c => c.name === votedOutName ? { ...c, status: 'voted_out' } : c));
                 setMessages(prev => [...prev, { sender: 'system', text: `투표 결과, ${votedOutName}님이 가장 많은 표를 받아 해고되었습니다...` }]);
                 
                 await new Promise(res => setTimeout(res, 2000));
                 
                 const wasVillainCaught = votedOutCharacter.isVillain;
-                const isPlayerTheVillain = playerCharacter?.isVillain;
 
                 if (wasVillainCaught) {
-                    // The villain was caught. It's a win for innocents, loss for the villain.
+                    // --- WIN CONDITION: VILLAIN CAUGHT ---
                     const finalMessage = votedOutCharacter.isPlayer 
                         ? `...그리고 밝혀진 진실은, 당신이 바로 오피스 빌런이었습니다! 덜미를 잡혔네요.`
                         : `축하합니다! ${votedOutName}은(는) 진짜 오피스 빌런이었습니다!`;
@@ -157,20 +235,54 @@ const App: React.FC = () => {
                     ]);
                     setGameState(isPlayerTheVillain ? 'game_over_loss' : 'game_over_win');
                 } else {
-                    // An innocent was caught. It's a loss for innocents, win for the villain.
-                    const finalMessage = isPlayerTheVillain
-                        ? `당신은 모두를 완벽하게 속였습니다! 진짜 빌런은 바로 당신, ${playerCharacter.name}이었습니다! 😈`
-                        : `안타깝네요... ${votedOutName}은(는) 빌런이 아니었습니다. 진짜 빌런은 ${villain?.name}이었습니다!`;
-                        
-                    setMessages(prev => [
-                        ...prev,
-                        { sender: 'system', text: finalMessage, isSpecial: true }
-                    ]);
-                    setGameState(isPlayerTheVillain ? 'game_over_win' : 'game_over_loss');
+                    // --- INNOCENT VOTED OUT ---
+                    if (votedOutCharacter.isPlayer) {
+                        // Player is innocent but got voted out -> Game over for player (Loss)
+                        const finalMessage = `안타깝네요... 당신은 빌런이 아니었지만, 동료들에게 지목당했습니다. 진짜 빌런은 ${villain?.name}이었습니다!`;
+                        setMessages(prev => [
+                            ...prev,
+                            { sender: 'system', text: finalMessage, isSpecial: true },
+                            { sender: villain!.name, text: `[자백] ${confession}` }
+                        ]);
+                        setGameState('game_over_loss');
+                        return;
+                    }
+
+                    const remainingCount = characters.filter(c => c.status === 'active').length - 1; // -1 for the person just voted out
+
+                    if (remainingCount <= 2) {
+                        // --- LOSS CONDITION: 1v1 REACHED ---
+                        const finalMessage = `안타깝네요... ${votedOutName}은(는) 빌런이 아니었습니다. 이제 ${remainingCount}명만 남아 빌런의 승리로 끝났습니다. 진짜 빌런은 ${villain?.name}이었습니다!`;
+                        setMessages(prev => [
+                            ...prev,
+                            { sender: 'system', text: finalMessage, isSpecial: true },
+                            { sender: villain!.name, text: `[자백] ${confession}` }
+                        ]);
+                        setGameState(isPlayerTheVillain ? 'game_over_win' : 'game_over_loss');
+                    } else {
+                        // --- GAME CONTINUES ---
+                        setMessages(prev => [...prev, {
+                            sender: 'system',
+                            text: `...하지만 ${votedOutName}은(는) 빌런이 아니었습니다! 아직 빌런이 남아있습니다. 토론을 계속하세요...`,
+                            isSpecial: true
+                        }]);
+                        setCharacters(prev => prev.map(c => ({...c, votes: 0}))); // Reset votes for next round
+                        setGameState('discussion');
+                    }
                 }
-            } else {
-                 setMessages(prev => [...prev, { sender: 'system', text: '투표 결과가 동점이라 아무도 해고되지 않았습니다. 토론을 계속합니다.' }]);
-                 setGameState('discussion');
+            } else { // 0 votes or no one voted out -> Villain wins
+                 setMessages(prev => [...prev, { 
+                    sender: 'system', 
+                    text: '아무도 지목되지 않았습니다. 빌런을 잡지 못했으므로, 시민들의 패배입니다...' ,
+                    isSpecial: true
+                }]);
+                await new Promise(res => setTimeout(res, 2000));
+                 setMessages(prev => [
+                    ...prev,
+                    { sender: 'system', text: `진짜 빌런은 ${villain?.name}이었습니다!`, isSpecial: true },
+                    { sender: villain!.name, text: `[자백] ${confession}` }
+                ]);
+                setGameState(isPlayerTheVillain ? 'game_over_win' : 'game_over_loss');
             }
 
         } catch (e) {
@@ -212,6 +324,9 @@ const App: React.FC = () => {
                     <div className="text-center p-8">
                         <h2 className="text-2xl font-bold text-slate-700 mb-4">사건 현장으로 이동 중...</h2>
                         <LoadingSpinner />
+                        <p className="text-slate-500 mt-4 text-lg h-6">
+                            {loadingMessage}
+                        </p>
                     </div>
                 );
             
@@ -221,25 +336,25 @@ const App: React.FC = () => {
             case 'game_over_win':
             case 'game_over_loss':
                 return (
-                    <div className="flex flex-col md:flex-row h-full gap-4 p-4">
+                    <div className="flex flex-row h-full w-full gap-4 p-4">
                         {/* Left Panel: Characters */}
-                        <div className="w-full md:w-1/3 lg:w-1/4 bg-slate-200/70 p-4 rounded-xl overflow-y-auto">
+                        <div className="w-1/3 lg:w-1/4 bg-white p-4 rounded-xl shadow-lg overflow-y-auto">
                             <h2 className="text-xl font-bold text-slate-800 mb-4 border-b-2 border-slate-300 pb-2">팀원 목록</h2>
-                            <div className="space-y-3">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 {characters.map(char => (
                                     <CharacterCard 
                                         key={char.name} 
                                         character={char} 
                                         onVote={handlePlayerVote}
                                         isVotingPhase={gameState === 'voting'}
-                                        isVoteDisabled={gameState !== 'voting'}
+                                        isVoteDisabled={gameState !== 'voting' || isLoading}
                                     />
                                 ))}
                             </div>
                         </div>
 
                         {/* Right Panel: Chat */}
-                        <div className="w-full md:w-2/3 lg:w-3/4 flex flex-col bg-white rounded-xl shadow-lg">
+                        <div className="w-2/3 lg:w-3/4 flex flex-col bg-white rounded-xl shadow-lg min-h-0">
                             <div className="flex-1 p-4 overflow-y-auto">
                                 {messages.map((msg, index) => <ChatBubble key={index} message={msg} playerCharacterName={playerCharacter?.name || null} />)}
                                 {isLoading && gameState !== 'reveal' && <LoadingSpinner />}

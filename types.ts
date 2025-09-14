@@ -4,7 +4,7 @@ export interface Character {
   personality: string;
   isVillain: boolean;
   status: 'active' | 'voted_out';
-  imageUrl: string;
+  imageUrl: string | null;
   isPlayer?: boolean;
   votes?: number;
 }
@@ -14,7 +14,7 @@ export interface Message {
   text: string;
   isSpecial?: boolean;
   isPrivate?: boolean;
-  imageUrl?: string;
+  imageUrl?: string | null;
 }
 
 export type GameState = 'welcome' | 'setting_up' | 'discussion' | 'voting' | 'reveal' | 'game_over_win' | 'game_over_loss';
