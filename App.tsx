@@ -3,6 +3,7 @@ import { generateGameSetupText, generateSabotageImage, generateCharacterPortrait
 import type { Character, Message, GameState } from './types';
 import CharacterCard from './components/CharacterCard';
 import ChatBubble from './components/ChatBubble';
+import GameOverAnimations from './components/GameOverAnimations';
 
 const LoadingSpinner: React.FC = () => (
     <div className="flex justify-center items-center">
@@ -131,16 +132,22 @@ const App: React.FC = () => {
     const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!userInput.trim() || isLoading || gameState !== 'discussion' || !playerCharacter) return;
-        
+
         const newPlayerMessage: Message = { sender: playerCharacter.name, text: userInput };
-        setMessages(prev => [...prev, newPlayerMessage]);
+        const messagesForApi = [...messages, newPlayerMessage];
+        setMessages(messagesForApi);
         setUserInput('');
         setIsLoading(true);
-        
+
         try {
-            const responses = await getCharacterResponses(userInput, characters, sabotage, [...messages, newPlayerMessage], playerCharacter.name);
-            const newCharacterMessages: Message[] = responses.map(r => ({ sender: r.name, text: r.response }));
-            setMessages(prev => [...prev, ...newCharacterMessages]);
+            const responseStream = getCharacterResponses(userInput, characters, sabotage, messagesForApi, playerCharacter.name);
+
+            for await (const response of responseStream) {
+                const newMessage: Message = { sender: response.name, text: response.response };
+                // Add a small delay for a more natural "typing" feel.
+                await new Promise(res => setTimeout(res, 250 + Math.random() * 300));
+                setMessages(prev => [...prev, newMessage]);
+            }
         } catch (e) {
             const errorMessage = e instanceof Error ? e.message : "An unknown error occurred.";
             setMessages(prev => [...prev, { sender: 'system', text: `Error: ${errorMessage}` }]);
@@ -337,6 +344,7 @@ const App: React.FC = () => {
             case 'game_over_loss':
                 return (
                     <div className="flex flex-row h-full w-full gap-4 p-4">
+                        {(gameState === 'game_over_win' || gameState === 'game_over_loss') && <GameOverAnimations gameState={gameState} />}
                         {/* Left Panel: Characters */}
                         <div className="w-1/3 lg:w-1/4 bg-white p-4 rounded-xl shadow-lg overflow-y-auto">
                             <h2 className="text-xl font-bold text-slate-800 mb-4 border-b-2 border-slate-300 pb-2">팀원 목록</h2>

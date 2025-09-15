@@ -17,7 +17,7 @@ const gameSetupSchema = {
         },
         sabotageImagePrompt: {
             type: Type.STRING,
-            description: "A detailed prompt in English for an image generation AI to create the main scene. It must describe a cute, bright retro pixel art scene depicting the sabotage and include all the characters defined below, with their specific appearances and reactions."
+            description: "A detailed prompt in English for a low-resolution, 8-bit style retro pixel art scene. The image should be simple and optimized for fast loading. It must describe the sabotage and include all characters with their reactions."
         },
         characters: {
             type: Type.ARRAY,
@@ -34,7 +34,7 @@ const gameSetupSchema = {
                     isVillain: { type: Type.BOOLEAN, description: "Designates if this character is the hidden villain. Only one can be true." },
                     portraitPrompt: {
                         type: Type.STRING,
-                        description: "A detailed prompt in English to generate a unique pixel art portrait for this character. e.g., 'A cute, expressive, retro pixel art portrait of a Korean office worker, a woman with orange hair in a bun and glasses, looking shocked. Bust shot, plain background.'"
+                        description: "A detailed prompt in English for a low-resolution, 64x64 pixel art portrait. e.g., 'A simple, expressive, 64x64 retro pixel art portrait of a Korean office worker, a woman with orange hair in a bun and glasses, looking shocked. Bust shot, plain background.'"
                     },
                 },
                 required: ["name", "position", "personality", "isVillain", "portraitPrompt"],
@@ -42,19 +42,6 @@ const gameSetupSchema = {
         },
     },
     required: ["sabotage", "sabotageImagePrompt", "characters"],
-};
-
-
-const characterResponseSchema = {
-    type: Type.ARRAY,
-    items: {
-        type: Type.OBJECT,
-        properties: {
-            name: { type: Type.STRING },
-            response: { type: Type.STRING }
-        },
-        required: ["name", "response"]
-    }
 };
 
 const voteAndConfessionSchema = {
@@ -87,8 +74,8 @@ export const generateGameSetupText = async (): Promise<{
 }> => {
     try {
         const setupPrompt = `
-            You are the game master for '오피스 빌런' (Office Villain). Your goal is to create a complete and cohesive scenario in one go.
-            1.  **Create a Sabotage Scenario**: Invent a creative, funny, and specific office sabotage scenario in Korean. It should be from a neutral, third-person perspective (e.g., "누군가..."). Be creative! The event could be anything from a classic prank to a weird, unexplainable occurrence. For example: "누군가 탕비실 커피머신 원두를 전부 디카페인으로 바꿔놓았다." (Someone replaced all the beans in the office coffee machine with decaf.), "누군가 대표님 의자를 어린이용 뿡뿡이 의자로 바꿔치기했다." (Someone swapped the CEO's chair with a children's squeaky chair.), or "누군가 사내게시판에 '퇴사하면 모든게 편해.. 퇴사해..' 라는 익명의 글을 올렸다." (Someone anonymously posted 'If you quit, everything becomes comfortable.. quit..' on the company bulletin board.).
+            You are the game master for '오피스 빌런' (Office Villain). Your goal is to create a complete and cohesive scenario in one go, optimized for speed.
+            1.  **Create a Sabotage Scenario**: Invent a creative, funny, and specific office sabotage scenario in Korean. It should be from a neutral, third-person perspective (e.g., "누군가...").
             2.  **Create Characters**: Create 4-5 distinct Korean office workers. For each character:
                 *   Assign a unique name, job position, and a very short, one-phrase personality in Korean.
                 *   Secretly designate ONLY ONE character as the villain ('isVillain: true').
@@ -96,8 +83,8 @@ export const generateGameSetupText = async (): Promise<{
             3.  **Create Main Image Prompt**: Write a detailed prompt in English for a cute, bright retro pixel art image. This prompt MUST:
                 *   Describe the sabotage scene from step 1.
                 *   Incorporate ALL characters from step 2, using their specific visual descriptions and describing their reactions.
-                *   CRITICAL: The image must be purely visual. Do NOT include any letters, words, or text in the image, regardless of the language.
-            4.  **Create Portrait Prompts**: For EACH character from step 2, write a separate, detailed prompt in English to generate their individual portrait. The prompt must be for a "cute, expressive, retro pixel art portrait... bust shot, plain background" and be based on their visual description.
+                *   CRITICAL: The style should be **low-resolution 8-bit retro pixel art** to ensure fast generation and loading. Do NOT include any letters, words, or text in the image.
+            4.  **Create Portrait Prompts**: For EACH character, write a separate, detailed prompt in English to generate their individual portrait. The prompt must be for a **"simple, low-resolution, 64x64 retro pixel art portrait... bust shot, plain background"** and be based on their visual description.
             5.  **Return as JSON**: Format the entire output as a single JSON object conforming to the provided schema.
         `;
 
@@ -170,13 +157,13 @@ export const generateCharacterPortraits = async (prompts: string[]): Promise<(st
 };
 
 
-export const getCharacterResponses = async (
+export async function* getCharacterResponses(
     userInput: string,
     characters: Character[],
     sabotage: string,
     chatHistory: Message[],
     playerCharacterName: string
-): Promise<{ name: string; response: string }[]> => {
+): AsyncGenerator<{ name: string; response: string }> {
     const activeAICharacters = characters.filter(c => c.status === 'active' && c.name !== playerCharacterName);
     const characterDescriptions = characters.filter(c => c.status === 'active').map(c => 
         `- ${c.name} (${c.position}): ${c.personality}. ${c.isVillain ? "This character is the villain. They must act deceptively and try to shift blame." : "This character is innocent and genuinely trying to find the villain."}`
@@ -185,13 +172,13 @@ export const getCharacterResponses = async (
     const history = chatHistory.slice(-6).map(m => `${m.sender}: ${m.text}`).join('\n');
 
     const prompt = `
-        You are roleplaying as multiple characters in the game 'Office Villain'.
-        
+        You are roleplaying as multiple characters in the game 'Office Villain'. Your primary goal is to generate dialogue that contains subtle clues and red herrings, allowing the player to deduce the villain's identity.
+
         **Scenario:** "${sabotage}"
-        
+
         **Characters:**
         ${characterDescriptions}
-        
+
         **Recent Conversation:**
         ${history}
 
@@ -199,23 +186,56 @@ export const getCharacterResponses = async (
 
         **Your Task:**
         Generate a response in Korean for each active AI character (${activeAICharacters.map(c => c.name).join(', ')}).
-        - **CRITICAL RULE:** Each response MUST be very short, 1 or 2 sentences at most.
-        - The responses must be strongly in-character, reflecting their unique personas.
-        - The villain's response should be subtle and deceptive. Innocent characters should respond genuinely.
-        - Provide the response as a JSON array.
+        - **Crucial:** Responses must be deeply in-character and reflect their unique personas and goals.
+        - **Keep responses concise and conversational**, typically 1-3 sentences.
+        - **React directly** to the player's message and the preceding conversation history.
+        - **OUTPUT FORMAT:** For each character, output a single, valid JSON object on its own line, followed by a newline. Do NOT use a JSON array or markdown backticks.
+        
+        **Example Output Format:**
+        {"name": "김대리", "response": "정말요? 저는 몰랐네요."}
+        {"name": "박과장", "response": "이건 분명 계획된 일이야..."}
+
+        **Character-Specific Instructions:**
+        - **If you are the VILLAIN:** Deceive with subtle tactics like misdirection, feigned surprise, or a weak alibi.
+        - **If you are INNOCENT:** Help uncover the truth by asking pointed questions, offering theories, or stating observations.
     `;
 
     try {
-        const response = await ai.models.generateContent({
+        const responseStream = await ai.models.generateContentStream({
             model: "gemini-2.5-flash",
             contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: characterResponseSchema,
-            },
         });
-        const jsonString = response.text;
-        return JSON.parse(jsonString);
+
+        let buffer = '';
+        for await (const chunk of responseStream) {
+            buffer += chunk.text;
+            let newlineIndex;
+            while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+                const line = buffer.substring(0, newlineIndex).trim();
+                buffer = buffer.substring(newlineIndex + 1);
+                if (line) {
+                    try {
+                        const parsed = JSON.parse(line);
+                        if (parsed.name && parsed.response) {
+                            yield parsed;
+                        }
+                    } catch (e) {
+                        console.warn("Could not parse JSON line from stream:", line, e);
+                    }
+                }
+            }
+        }
+        if (buffer.trim()) {
+            try {
+                const parsed = JSON.parse(buffer.trim());
+                 if (parsed.name && parsed.response) {
+                    yield parsed;
+                }
+            } catch (e) {
+                console.warn("Could not parse final JSON from stream buffer:", buffer.trim(), e);
+            }
+        }
+
     } catch (error) {
         console.error("Error getting character responses:", error);
         throw new Error("The AI colleagues are busy with the sabotage and couldn't respond. Please try again.");
