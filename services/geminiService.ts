@@ -7,17 +7,12 @@ if (!process.env.API_KEY) {
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// A single, optimized schema to generate the entire game setup in one go.
 const gameSetupSchema = {
     type: Type.OBJECT,
     properties: {
         sabotage: {
             type: Type.STRING,
-            description: "A creative, funny, and specific office sabotage scenario caused by the villain, in Korean. This text must be suitable for displaying as an alert.",
-        },
-        sabotageImagePrompt: {
-            type: Type.STRING,
-            description: "A detailed prompt in English for a low-resolution, 8-bit style retro pixel art scene. The image should be simple and optimized for fast loading. It must describe the sabotage and include all characters with their reactions."
+            description: "A creative, funny, and specific office sabotage scenario in Korean. This text must be suitable for displaying as an alert.",
         },
         characters: {
             type: Type.ARRAY,
@@ -32,16 +27,16 @@ const gameSetupSchema = {
                         description: "A very short, one-phrase personality description in Korean (e.g., '늘 의욕이 넘치는', '매사에 시니컬한')."
                     },
                     isVillain: { type: Type.BOOLEAN, description: "Designates if this character is the hidden villain. Only one can be true." },
-                    portraitPrompt: {
+                    visualDescription: {
                         type: Type.STRING,
-                        description: "A detailed prompt in English for a low-resolution, 64x64 pixel art portrait. e.g., 'A simple, expressive, 64x64 retro pixel art portrait of a Korean office worker, a woman with orange hair in a bun and glasses, looking shocked. Bust shot, plain background.'"
+                        description: "A short visual description in English for the portrait (e.g., 'a woman with orange hair in a bun and glasses, looking shocked'). This will be used to generate a pixel art portrait."
                     },
                 },
-                required: ["name", "position", "personality", "isVillain", "portraitPrompt"],
+                required: ["name", "position", "personality", "isVillain", "visualDescription"],
             },
         },
     },
-    required: ["sabotage", "sabotageImagePrompt", "characters"],
+    required: ["sabotage", "characters"],
 };
 
 const voteAndConfessionSchema = {
@@ -68,24 +63,26 @@ const voteAndConfessionSchema = {
 };
 
 export const generateGameSetupText = async (): Promise<{
-    characters: (Omit<Character, 'status' | 'isPlayer' | 'votes' | 'imageUrl' | 'isVillain'> & { isVillain: boolean; portraitPrompt: string; })[];
+    characters: (Omit<Character, 'status' | 'isPlayer' | 'votes' | 'imageUrl' | 'isVillain'> & { isVillain: boolean; portraitPrompt: string; visualDescription: string; })[];
     sabotage: string;
-    sabotageImagePrompt: string;
 }> => {
     try {
         const setupPrompt = `
-            You are the game master for '오피스 빌런' (Office Villain). Your goal is to create a complete and cohesive scenario in one go, optimized for speed.
-            1.  **Create a Sabotage Scenario**: Invent a creative, funny, and specific office sabotage scenario in Korean. It should be from a neutral, third-person perspective (e.g., "누군가...").
+            You are the game master for '오피스 빌런' (Office Villain). Your goal is to create a scenario optimized for speed.
+            1.  **Create a Sabotage Scenario**:
+                *   Invent a creative, funny, yet **plausible** office sabotage scenario in Korean. The key is realism - it should be something that could actually happen in a modern office.
+                *   **CRITICAL: AVOID BORING or OVERLY FANTASY THEMES.** Do **NOT** use scenarios involving: the pantry, the break room, coffee, snacks, or physical damage.
+                *   **INSTEAD, FOCUS ON RELATABLE OFFICE PRANKS & MISHAPS:** Use ideas like:
+                    *   "누군가 사내 게시판에 '퇴사하면 모든 게 편해져요'라는 익명의 글을 올렸습니다." (Someone anonymously posted 'Resigning makes everything easier' on the company bulletin board.)
+                    *   "누군가 모든 사무실 의자의 높이를 최저로 낮춰놓았습니다." (Someone lowered all the office chairs to their minimum height.)
+                    *   "누군가 회의실 예약 시스템에 'CEO님과의 비밀 티타임' 같은 가짜 예약을 잔뜩 잡아놓았습니다." (Someone filled the meeting room booking system with fake appointments like 'Secret Tea Time with the CEO'.)
+                    *   "누군가 회사 공용 프린터의 기본 폰트를 '궁서체'로 바꿔놓았습니다." (Someone changed the default font on the company printer to 'Gungseo'.)
+                *   The description must be from a neutral, third-person perspective (e.g., "누군가...").
             2.  **Create Characters**: Create 4-5 distinct Korean office workers. For each character:
                 *   Assign a unique name, job position, and a very short, one-phrase personality in Korean.
                 *   Secretly designate ONLY ONE character as the villain ('isVillain: true').
-                *   Provide a detailed visual description (hair, clothes, expression).
-            3.  **Create Main Image Prompt**: Write a detailed prompt in English for a cute, bright retro pixel art image. This prompt MUST:
-                *   Describe the sabotage scene from step 1.
-                *   Incorporate ALL characters from step 2, using their specific visual descriptions and describing their reactions.
-                *   CRITICAL: The style should be **low-resolution 8-bit retro pixel art** to ensure fast generation and loading. Do NOT include any letters, words, or text in the image.
-            4.  **Create Portrait Prompts**: For EACH character, write a separate, detailed prompt in English to generate their individual portrait. The prompt must be for a **"simple, low-resolution, 64x64 retro pixel art portrait... bust shot, plain background"** and be based on their visual description.
-            5.  **Return as JSON**: Format the entire output as a single JSON object conforming to the provided schema.
+                *   Provide a short visual description in English for their portrait (e.g., "a man with black hair and a mustache, looking nervous").
+            3.  **Return as JSON**: Format the entire output as a single JSON object conforming to the provided schema. You only need to provide the sabotage description and the character list.
         `;
 
         const setupGenResponse = await ai.models.generateContent({
@@ -98,10 +95,17 @@ export const generateGameSetupText = async (): Promise<{
         });
         const gameData = JSON.parse(setupGenResponse.text);
 
+        const charactersWithPrompts = gameData.characters.map((char: any) => {
+            const fullPrompt = `A simple, low-resolution, 64x64 retro pixel art portrait of a Korean office worker, ${char.visualDescription}. Bust shot, plain background.`;
+            return {
+                ...char,
+                portraitPrompt: fullPrompt,
+            };
+        });
+
         return {
             sabotage: gameData.sabotage,
-            sabotageImagePrompt: gameData.sabotageImagePrompt,
-            characters: gameData.characters
+            characters: charactersWithPrompts,
         };
 
     } catch (error) {
@@ -110,7 +114,7 @@ export const generateGameSetupText = async (): Promise<{
     }
 };
 
-export const generateSabotageImage = async (prompt: string): Promise<string | null> => {
+export const generatePixelArtImage = async (prompt: string): Promise<string | null> => {
     if (!prompt) return null;
     try {
         const response = await ai.models.generateImages({
@@ -125,37 +129,10 @@ export const generateSabotageImage = async (prompt: string): Promise<string | nu
         const base64ImageBytes = response.generatedImages[0].image.imageBytes;
         return `data:image/png;base64,${base64ImageBytes}`;
     } catch (imageError) {
-        console.warn("Could not generate sabotage image, likely due to API quota. Continuing without it.", imageError);
+        console.warn("Could not generate a pixel art image, likely due to API quota. Continuing without it.", imageError);
         return null;
     }
 };
-
-export const generateCharacterPortraits = async (prompts: string[]): Promise<(string | null)[]> => {
-    if (!prompts || prompts.length === 0) return [];
-    try {
-        const imageGenerationPromises = prompts.map(prompt => 
-            ai.models.generateImages({
-                model: 'imagen-4.0-generate-001',
-                prompt: prompt,
-                config: {
-                  numberOfImages: 1,
-                  outputMimeType: 'image/png',
-                  aspectRatio: '1:1',
-                },
-            })
-        );
-        const allImageResponses = await Promise.all(imageGenerationPromises);
-
-        return allImageResponses.map(response => {
-            const base64ImageBytes: string = response.generatedImages[0].image.imageBytes;
-            return `data:image/png;base64,${base64ImageBytes}`;
-        });
-    } catch (imageError) {
-        console.warn("Could not generate character portraits, likely due to API quota. Continuing without them.", imageError);
-        return Array(prompts.length).fill(null);
-    }
-};
-
 
 export async function* getCharacterResponses(
     userInput: string,

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { generateGameSetupText, generateSabotageImage, generateCharacterPortraits, getCharacterResponses, getVoteAndConfession } from './services/geminiService';
+import { generateGameSetupText, generatePixelArtImage, getCharacterResponses, getVoteAndConfession } from './services/geminiService';
 import type { Character, Message, GameState } from './types';
 import CharacterCard from './components/CharacterCard';
 import ChatBubble from './components/ChatBubble';
@@ -64,14 +64,14 @@ const App: React.FC = () => {
         setMessages([{ sender: 'system', text: '새로운 오피스 빌런 사건을 접수하는 중입니다...' }]);
         
         try {
-            // Step 1: Get text data first (Fast)
-            const { characters: charactersWithPrompts, sabotage: newSabotage, sabotageImagePrompt } = await generateGameSetupText();
+            // Step 1: Get essential text data first (Faster)
+            const { characters: charactersWithPrompts, sabotage: newSabotage } = await generateGameSetupText();
 
             // Step 2: Immediately set up game state and render UI
             const playerIndex = Math.floor(Math.random() * charactersWithPrompts.length);
             
             const newCharacters: Character[] = charactersWithPrompts.map((c, index) => {
-                const { portraitPrompt, ...restOfChar } = c;
+                const { portraitPrompt, visualDescription, ...restOfChar } = c;
                 return {
                     ...restOfChar,
                     status: 'active',
@@ -104,8 +104,12 @@ const App: React.FC = () => {
             setGameState('discussion');
             setIsLoading(false); 
 
-            // Step 3: Generate images in the background (Slow)
-            generateSabotageImage(sabotageImagePrompt).then(sabotageImageUrl => {
+            // Step 3: Generate images in the background (Slow & Progressive)
+            // Construct the sabotage image prompt on the client-side
+            const characterVisuals = charactersWithPrompts.map(c => c.visualDescription).join(', ');
+            const sabotageImagePrompt = `A cute, bright, low-resolution 8-bit retro pixel art scene. It depicts an office where a sabotage has occurred: "${newSabotage}". The following people are in the scene, reacting to the situation: ${characterVisuals}. There should be no text or letters in the image.`;
+
+            generatePixelArtImage(sabotageImagePrompt).then(sabotageImageUrl => {
                 if (sabotageImageUrl) {
                     setMessages(prev => prev.map(msg => 
                         msg.isSpecial ? { ...msg, imageUrl: sabotageImageUrl } : msg
@@ -114,11 +118,19 @@ const App: React.FC = () => {
             });
             
             const portraitPrompts = charactersWithPrompts.map(c => c.portraitPrompt);
-            generateCharacterPortraits(portraitPrompts).then(imageUrls => {
-                 setCharacters(prev => prev.map((char, index) => ({
-                    ...char,
-                    imageUrl: imageUrls[index],
-                })));
+            portraitPrompts.forEach((prompt, index) => {
+                if (!prompt) return;
+                generatePixelArtImage(prompt).then(imageUrl => {
+                    if (imageUrl) {
+                        setCharacters(prev => {
+                            const updatedChars = [...prev];
+                            if (updatedChars[index]) {
+                                updatedChars[index].imageUrl = imageUrl;
+                            }
+                            return updatedChars;
+                        });
+                    }
+                });
             });
 
         } catch (e) {
