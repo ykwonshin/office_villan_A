@@ -17,4 +17,4 @@ export interface Message {
   imageUrl?: string | null;
 }
 
-export type GameState = 'welcome' | 'setting_up' | 'discussion' | 'voting' | 'reveal' | 'game_over_win' | 'game_over_loss';
+export type GameState = 'welcome' | 'setting_up' | 'briefing' | 'discussion' | 'voting' | 'reveal' | 'game_over_win' | 'game_over_loss';

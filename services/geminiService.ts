@@ -77,6 +77,9 @@ export const generateGameSetupText = async (): Promise<{
                     *   "누군가 모든 사무실 의자의 높이를 최저로 낮춰놓았습니다." (Someone lowered all the office chairs to their minimum height.)
                     *   "누군가 회의실 예약 시스템에 'CEO님과의 비밀 티타임' 같은 가짜 예약을 잔뜩 잡아놓았습니다." (Someone filled the meeting room booking system with fake appointments like 'Secret Tea Time with the CEO'.)
                     *   "누군가 회사 공용 프린터의 기본 폰트를 '궁서체'로 바꿔놓았습니다." (Someone changed the default font on the company printer to 'Gungseo'.)
+                    *   "누군가 사무실 와이파이 비밀번호를 'ilovemyboss1234'로 바꿔놓았습니다." (Someone changed the office Wi-Fi password to 'ilovemyboss1234'.)
+                    *   "누군가 회사 대표전화의 통화 연결음을 최신 아이돌 댄스곡으로 바꿔놓았습니다." (Someone changed the company's main line hold music to the latest idol dance song.)
+                    *   "누군가 모든 직원의 컴퓨터 바탕화면을 활짝 웃는 CEO의 얼굴 사진으로 통일했습니다." (Someone unified all employees' desktop backgrounds to a picture of the CEO's beaming face.)
                 *   The description must be from a neutral, third-person perspective (e.g., "누군가...").
             2.  **Create Characters**: Create 4-5 distinct Korean office workers. For each character:
                 *   Assign a unique name, job position, and a very short, one-phrase personality in Korean.

@@ -31,6 +31,8 @@ const App: React.FC = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [loadingMessage, setLoadingMessage] = useState<string>(loadingTexts[0]);
+    const [revealedCharactersCount, setRevealedCharactersCount] = useState(0);
+
 
     const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -55,6 +57,21 @@ const App: React.FC = () => {
             return () => clearInterval(interval);
         }
     }, [gameState]);
+
+    useEffect(() => {
+        if (gameState === 'briefing' && characters.length > 0) {
+            setRevealedCharactersCount(0);
+            // FIX: Use ReturnType<typeof setTimeout> for browser compatibility instead of NodeJS.Timeout
+            const timers: ReturnType<typeof setTimeout>[] = [];
+            for (let i = 0; i < characters.length; i++) {
+                const timer = setTimeout(() => {
+                    setRevealedCharactersCount(count => count + 1);
+                }, 300 + i * 250);
+                timers.push(timer);
+            }
+            return () => timers.forEach(clearTimeout);
+        }
+    }, [gameState, characters.length]);
 
 
     const handleStartGame = useCallback(async () => {
@@ -100,8 +117,8 @@ const App: React.FC = () => {
             ];
             setMessages(initialMessages);
             
-            // Go to discussion, user can now interact
-            setGameState('discussion');
+            // Go to briefing for a narrative intro
+            setGameState('briefing');
             setIsLoading(false); 
 
             // Step 3: Generate images in the background (Slow & Progressive)
@@ -348,6 +365,34 @@ const App: React.FC = () => {
                         </p>
                     </div>
                 );
+
+            case 'briefing':
+                const revealedCharacters = characters.slice(0, revealedCharactersCount);
+                return (
+                    <div className="w-full max-w-4xl mx-auto p-4 md:p-8 text-center animate-fade-in">
+                        <h1 className="text-2xl md:text-3xl font-bold text-slate-800 mb-4">사건 개요</h1>
+                        <div className="my-4">
+                            {messages.find(m => m.isSpecial) && <ChatBubble message={messages.find(m => m.isSpecial)!} playerCharacterName={null} />}
+                        </div>
+                        <h2 className="text-xl md:text-2xl font-bold text-slate-700 mt-6 mb-4">용의 선상에 오른 팀원들</h2>
+                        <div className={`grid grid-cols-2 sm:grid-cols-3 md:grid-cols-${Math.min(characters.length, 5)} gap-3`}>
+                            {revealedCharacters.map(char => (
+                                <div key={char.name} className="animate-fade-in-up">
+                                    <CharacterCard character={char} onVote={() => {}} isVotingPhase={false} isVoteDisabled={true} />
+                                </div>
+                            ))}
+                        </div>
+
+                        {revealedCharactersCount === characters.length && characters.length > 0 && (
+                            <button 
+                                onClick={() => setGameState('discussion')} 
+                                className="mt-8 bg-blue-600 text-white font-bold py-3 px-8 rounded-lg text-lg hover:bg-blue-700 transition-transform hover:scale-105 animate-fade-in"
+                            >
+                                조사 시작
+                            </button>
+                        )}
+                    </div>
+                );
             
             case 'discussion':
             case 'voting':
@@ -419,6 +464,22 @@ const App: React.FC = () => {
     
     return (
         <main className="container mx-auto max-w-7xl h-[calc(100vh-2rem)] my-4">
+            <style>{`
+                @keyframes fade-in {
+                    from { opacity: 0; }
+                    to { opacity: 1; }
+                }
+                .animate-fade-in {
+                    animation: fade-in 0.5s ease-in-out;
+                }
+                @keyframes fade-in-up {
+                    from { opacity: 0; transform: translateY(20px); }
+                    to { opacity: 1; transform: translateY(0); }
+                }
+                .animate-fade-in-up {
+                    animation: fade-in-up 0.4s ease-out forwards;
+                }
+            `}</style>
             <div className="h-full bg-slate-50 rounded-2xl shadow-2xl shadow-slate-300/50 flex justify-center items-center">
                 {renderGameState()}
             </div>
