@@ -124,7 +124,7 @@ const App: React.FC = () => {
             // Step 3: Generate images in the background (Slow & Progressive)
             // Construct the sabotage image prompt on the client-side
             const characterVisuals = charactersWithPrompts.map(c => c.visualDescription).join(', ');
-            const sabotageImagePrompt = `A cute, bright, low-resolution 8-bit retro pixel art scene. It depicts an office where a sabotage has occurred: "${newSabotage}". The following people are in the scene, reacting to the situation: ${characterVisuals}. There should be no text or letters in the image.`;
+            const sabotageImagePrompt = `A vibrant, detailed 8-bit pixel art scene of a corporate office break room. A group of cute, chibi-style office workers (${characterVisuals}) are gathered, looking confused and shocked. The scene depicts the aftermath of a sabotage event: "${newSabotage}". The style should be reminiscent of classic RPGs, with expressive characters. No text or letters in the image.`;
 
             generatePixelArtImage(sabotageImagePrompt).then(sabotageImageUrl => {
                 if (sabotageImageUrl) {

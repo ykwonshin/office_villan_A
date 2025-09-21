@@ -29,7 +29,7 @@ const gameSetupSchema = {
                     isVillain: { type: Type.BOOLEAN, description: "Designates if this character is the hidden villain. Only one can be true." },
                     visualDescription: {
                         type: Type.STRING,
-                        description: "A short visual description in English for the portrait (e.g., 'a woman with orange hair in a bun and glasses, looking shocked'). This will be used to generate a pixel art portrait."
+                        description: "A short visual description in English for the portrait, in a cute chibi pixel art style (e.g., 'a surprised man with spiky brown hair', 'a curious woman with a side ponytail'). This will be used to generate a pixel art portrait."
                     },
                 },
                 required: ["name", "position", "personality", "isVillain", "visualDescription"],
@@ -99,7 +99,7 @@ export const generateGameSetupText = async (): Promise<{
         const gameData = JSON.parse(setupGenResponse.text);
 
         const charactersWithPrompts = gameData.characters.map((char: any) => {
-            const fullPrompt = `A simple, low-resolution, 64x64 retro pixel art portrait of a Korean office worker, ${char.visualDescription}. Bust shot, plain background.`;
+            const fullPrompt = `Cute 8-bit pixel art portrait of a Korean office worker, ${char.visualDescription}. Chibi style, bust shot, plain background, reminiscent of a classic RPG character sprite.`;
             return {
                 ...char,
                 portraitPrompt: fullPrompt,
