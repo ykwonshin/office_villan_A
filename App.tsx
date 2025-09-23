@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { generateGameSetupText, generatePixelArtImage, getCharacterResponses, getVoteAndConfession, editImageToRemoveCharacter } from './services/geminiService';
+import { getPregeneratedGameSetup, getCharacterResponses, getVoteAndConfession, editImageToRemoveCharacter } from './services/geminiService';
 import type { Character, Message, GameState } from './types';
 import CharacterCard from './components/CharacterCard';
 import ChatBubble from './components/ChatBubble';
@@ -83,30 +83,31 @@ const App: React.FC = () => {
         setGameState('setting_up');
         setMessages([{ sender: 'system', text: '새로운 오피스 빌런 사건을 접수하는 중입니다...' }]);
         
-        try {
-            // Step 1: Get essential text data first (Faster)
-            const { characters: charactersWithPrompts, sabotage: newSabotage } = await generateGameSetupText();
+        // Artificial delay for smooth transition and for user to see the loading message.
+        await new Promise(resolve => setTimeout(resolve, 1500));
 
-            // Step 2: Immediately set up game state and render UI
-            const playerIndex = Math.floor(Math.random() * charactersWithPrompts.length);
+        try {
+            // Step 1: Get pre-generated game data instantly. No API calls here.
+            const { characters: pregenCharacters, sabotage: newSabotage, sceneImageUrl: newSceneImage } = getPregeneratedGameSetup();
+
+            // Step 2: Immediately set up game state
+            const playerIndex = Math.floor(Math.random() * pregenCharacters.length);
             
-            const newCharacters: Character[] = charactersWithPrompts.map((c, index) => {
-                const { portraitPrompt, ...restOfChar } = c;
-                return {
-                    ...restOfChar,
-                    status: 'active',
-                    isPlayer: index === playerIndex,
-                    votes: 0,
-                    imageUrl: null, // Image is null initially
-                };
-            });
+            const newCharacters: Character[] = pregenCharacters.map((c, index) => ({
+                ...c,
+                status: 'active',
+                isPlayer: index === playerIndex,
+                votes: 0,
+            }));
 
             const player = newCharacters.find(c => c.isPlayer)!;
+            const gameVillain = newCharacters.find(c => c.isVillain) || null;
+
             setPlayerCharacter(player);
             setCharacters(newCharacters);
             setSabotage(newSabotage);
-            const gameVillain = newCharacters.find(c => c.isVillain) || null;
             setVillain(gameVillain);
+            setSceneImageUrl(newSceneImage);
 
             const initialMessages: Message[] = [
                 { sender: 'system', text: `당신은 이 게임의 주인공, ${player.name}입니다.`, isPrivate: true },
@@ -114,47 +115,17 @@ const App: React.FC = () => {
                     sender: 'system', 
                     text: `🚨긴급🚨\n\n"${newSabotage}"\n\n사건이 발생했습니다! 범인은 이 안에 있습니다.`, 
                     isSpecial: true,
-                    imageUrl: null, // Image is null initially
+                    imageUrl: newSceneImage, 
                 },
                 { sender: 'system', text: '동료들과 대화하여 오피스 빌런을 찾아내세요.' }
             ];
             setMessages(initialMessages);
             
-            // Go to briefing for a narrative intro
             setGameState('briefing');
             setIsLoading(false); 
 
-            // Step 3: Generate images in the background (Slow & Progressive)
-            const characterVisuals = charactersWithPrompts.map(c => c.visualDescription).join(', ');
-            const sabotageImagePrompt = `A vibrant, detailed 8-bit pixel art scene of a corporate office break room. A group of cute, chibi-style office workers (${characterVisuals}) are gathered, looking confused and shocked. The scene depicts the aftermath of a sabotage event: "${newSabotage}". The style should be reminiscent of classic RPGs, with expressive characters. Crucially, do NOT include any text, letters, or words in the image.`;
-
-            generatePixelArtImage(sabotageImagePrompt).then(sabotageImageUrl => {
-                if (sabotageImageUrl) {
-                    setSceneImageUrl(sabotageImageUrl);
-                    setMessages(prev => prev.map(msg => 
-                        msg.isSpecial ? { ...msg, imageUrl: sabotageImageUrl } : msg
-                    ));
-                }
-            });
-            
-            const portraitPrompts = charactersWithPrompts.map(c => c.portraitPrompt);
-            portraitPrompts.forEach((prompt, index) => {
-                if (!prompt) return;
-                generatePixelArtImage(prompt).then(imageUrl => {
-                    if (imageUrl) {
-                        setCharacters(prev => {
-                            const updatedChars = [...prev];
-                            if (updatedChars[index]) {
-                                updatedChars[index].imageUrl = imageUrl;
-                            }
-                            return updatedChars;
-                        });
-                    }
-                });
-            });
-
         } catch (e) {
-            const errorMessage = e instanceof Error ? e.message : "An unknown error occurred.";
+            const errorMessage = "게임 데이터를 불러오는 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.";
             setError(errorMessage);
             setGameState('welcome');
             setIsLoading(false);

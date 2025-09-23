@@ -1,43 +1,12 @@
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import type { Character, Message } from '../types';
+import { pregeneratedGameSets, GameSet } from '../pregeneratedContent';
 
 if (!process.env.API_KEY) {
     throw new Error("API_KEY environment variable not set");
 }
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
-const gameSetupSchema = {
-    type: Type.OBJECT,
-    properties: {
-        sabotage: {
-            type: Type.STRING,
-            description: "A creative, funny, and specific office sabotage scenario in Korean. This text must be suitable for displaying as an alert.",
-        },
-        characters: {
-            type: Type.ARRAY,
-            description: "An array of 4-5 office worker characters.",
-            items: {
-                type: Type.OBJECT,
-                properties: {
-                    name: { type: Type.STRING, description: "A unique Korean name for the character." },
-                    position: { type: Type.STRING, description: "The character's job position." },
-                    personality: {
-                        type: Type.STRING,
-                        description: "A very short, one-phrase personality description in Korean (e.g., '늘 의욕이 넘치는', '매사에 시니컬한')."
-                    },
-                    isVillain: { type: Type.BOOLEAN, description: "Designates if this character is the hidden villain. Only one can be true." },
-                    visualDescription: {
-                        type: Type.STRING,
-                        description: "A short visual description in English for the portrait, in a cute chibi pixel art style (e.g., 'a surprised man with spiky brown hair', 'a curious woman with a side ponytail'). This will be used to generate a pixel art portrait."
-                    },
-                },
-                required: ["name", "position", "personality", "isVillain", "visualDescription"],
-            },
-        },
-    },
-    required: ["sabotage", "characters"],
-};
 
 const voteAndConfessionSchema = {
     type: Type.OBJECT,
@@ -62,80 +31,17 @@ const voteAndConfessionSchema = {
     required: ["votes", "confession"]
 };
 
-export const generateGameSetupText = async (): Promise<{
-    characters: (Omit<Character, 'status' | 'isPlayer' | 'votes' | 'imageUrl'> & { isVillain: boolean; portraitPrompt: string; })[];
-    sabotage: string;
-}> => {
-    try {
-        const setupPrompt = `
-            You are the game master for '오피스 빌런' (Office Villain). Your goal is to create a scenario optimized for speed.
-            1.  **Create a Sabotage Scenario**:
-                *   Invent a creative, funny, yet **plausible** office sabotage scenario in Korean. The key is realism - it should be something that could actually happen in a modern office.
-                *   **CRITICAL: AVOID BORING or OVERLY FANTASY THEMES.** Do **NOT** use scenarios involving: the pantry, the break room, coffee, snacks, or physical damage.
-                *   **INSTEAD, FOCUS ON RELATABLE OFFICE PRANKS & MISHAPS:** Use ideas like:
-                    *   "누군가 사내 게시판에 '퇴사하면 모든 게 편해져요'라는 익명의 글을 올렸습니다." (Someone anonymously posted 'Resigning makes everything easier' on the company bulletin board.)
-                    *   "누군가 모든 사무실 의자의 높이를 최저로 낮춰놓았습니다." (Someone lowered all the office chairs to their minimum height.)
-                    *   "누군가 회의실 예약 시스템에 'CEO님과의 비밀 티타임' 같은 가짜 예약을 잔뜩 잡아놓았습니다." (Someone filled the meeting room booking system with fake appointments like 'Secret Tea Time with the CEO'.)
-                    *   "누군가 회사 공용 프린터의 기본 폰트를 '궁서체'로 바꿔놓았습니다." (Someone changed the default font on the company printer to 'Gungseo'.)
-                    *   "누군가 사무실 와이파이 비밀번호를 'ilovemyboss1234'로 바꿔놓았습니다." (Someone changed the office Wi-Fi password to 'ilovemyboss1234'.)
-                    *   "누군가 회사 대표전화의 통화 연결음을 최신 아이돌 댄스곡으로 바꿔놓았습니다." (Someone changed the company's main line hold music to the latest idol dance song.)
-                    *   "누군가 모든 직원의 컴퓨터 바탕화면을 활짝 웃는 CEO의 얼굴 사진으로 통일했습니다." (Someone unified all employees' desktop backgrounds to a picture of the CEO's beaming face.)
-                *   The description must be from a neutral, third-person perspective (e.g., "누군가...").
-            2.  **Create Characters**: Create 4-5 distinct Korean office workers. For each character:
-                *   Assign a unique name, job position, and a very short, one-phrase personality in Korean.
-                *   Secretly designate ONLY ONE character as the villain ('isVillain: true').
-                *   Provide a short visual description in English for their portrait (e.g., "a man with black hair and a mustache, looking nervous").
-            3.  **Return as JSON**: Format the entire output as a single JSON object conforming to the provided schema. You only need to provide the sabotage description and the character list.
-        `;
-
-        const setupGenResponse = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: setupPrompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: gameSetupSchema,
-            },
-        });
-        const gameData = JSON.parse(setupGenResponse.text);
-
-        const charactersWithPrompts = gameData.characters.map((char: any) => {
-            const fullPrompt = `Cute 8-bit pixel art portrait of a Korean office worker, ${char.visualDescription}. Chibi style, bust shot, plain background, reminiscent of a classic RPG character sprite.`;
-            return {
-                ...char,
-                portraitPrompt: fullPrompt,
-            };
-        });
-
-        return {
-            sabotage: gameData.sabotage,
-            characters: charactersWithPrompts,
-        };
-
-    } catch (error) {
-        console.error("Error setting up game (text-generation phase):", error);
-        throw new Error("Failed to initialize the game with the AI. Please check your API key and network connection.");
-    }
+/**
+ * Selects a random pre-generated game set.
+ * This is now an instant, local operation with no API calls.
+ */
+export const getPregeneratedGameSetup = (): GameSet => {
+    const randomIndex = Math.floor(Math.random() * pregeneratedGameSets.length);
+    const gameSet = pregeneratedGameSets[randomIndex];
+    // Return a deep copy to prevent mutations from affecting the original data
+    return JSON.parse(JSON.stringify(gameSet));
 };
 
-export const generatePixelArtImage = async (prompt: string): Promise<string | null> => {
-    if (!prompt) return null;
-    try {
-        const response = await ai.models.generateImages({
-            model: 'imagen-4.0-generate-001',
-            prompt: prompt,
-            config: {
-              numberOfImages: 1,
-              outputMimeType: 'image/png',
-              aspectRatio: '1:1',
-            },
-        });
-        const base64ImageBytes = response.generatedImages[0].image.imageBytes;
-        return `data:image/png;base64,${base64ImageBytes}`;
-    } catch (imageError) {
-        console.warn("Could not generate a pixel art image, likely due to API quota. Continuing without it.", imageError);
-        return null;
-    }
-};
 
 export const editImageToRemoveCharacter = async (base64ImageDataWithPrefix: string, characterDescription: string): Promise<string | null> => {
     if (!base64ImageDataWithPrefix || !characterDescription) return null;
@@ -180,6 +86,53 @@ export const editImageToRemoveCharacter = async (base64ImageDataWithPrefix: stri
     }
 };
 
+/**
+ * Creates a tailored, focused prompt for a single character's response.
+ */
+const createIndividualPromptFor = (
+    character: Character,
+    allCharacters: Character[],
+    sabotage: string,
+    chatHistory: Message[],
+    playerCharacterName: string,
+    userInput: string
+): string => {
+    const characterDescriptions = allCharacters.filter(c => c.status === 'active').map(c => 
+        `- ${c.name} (${c.position}): ${c.personality}.`
+    ).join('\n');
+    
+    const history = chatHistory.slice(-4).map(m => `${m.sender}: ${m.text}`).join('\n');
+
+    return `
+        You are roleplaying as a single character in the game 'Office Villain'. Your persona is defined below. Your goal is to respond to the player's latest message in a way that is consistent with your personality and secret role (innocent or villain).
+
+        **Scenario:** "${sabotage}"
+
+        **All Characters in this scene:**
+        ${characterDescriptions}
+
+        ---
+        **YOUR CHARACTER PROFILE:**
+        - **Name:** ${character.name}
+        - **Position:** ${character.position}
+        - **Personality:** ${character.personality}
+        - **Your Secret Role:** You are **${character.isVillain ? "the VILLAIN" : "INNOCENT"}**.
+        ---
+
+        **Recent Conversation:**
+        ${history}
+        **The Player (${playerCharacterName}) just said:** "${userInput}"
+
+        **Your Task:**
+        Generate a short, conversational response in Korean from the perspective of **${character.name}**.
+        - If you are the VILLAIN, be deceptive. Hint at others, feign ignorance, or create a weak alibi.
+        - If you are INNOCENT, be genuinely helpful or suspicious. Ask questions or share observations.
+        - Your response should be 1-3 sentences.
+        - **Output ONLY the dialogue text. Do NOT include your character name or any JSON formatting.**
+    `;
+};
+
+
 export async function* getCharacterResponses(
     userInput: string,
     characters: Character[],
@@ -188,80 +141,34 @@ export async function* getCharacterResponses(
     playerCharacterName: string
 ): AsyncGenerator<{ name: string; response: string }> {
     const activeAICharacters = characters.filter(c => c.status === 'active' && c.name !== playerCharacterName);
-    const characterDescriptions = characters.filter(c => c.status === 'active').map(c => 
-        `- ${c.name} (${c.position}): ${c.personality}. ${c.isVillain ? "This character is the villain. They must act deceptively and try to shift blame." : "This character is innocent and genuinely trying to find the villain."}`
-    ).join('\n');
 
-    const history = chatHistory.slice(-6).map(m => `${m.sender}: ${m.text}`).join('\n');
-
-    const prompt = `
-        You are roleplaying as multiple characters in the game 'Office Villain'. Your primary goal is to generate dialogue that contains subtle clues and red herrings, allowing the player to deduce the villain's identity.
-
-        **Scenario:** "${sabotage}"
-
-        **Characters:**
-        ${characterDescriptions}
-
-        **Recent Conversation:**
-        ${history}
-
-        **The Player (${playerCharacterName})'s latest message:** "${userInput}"
-
-        **Your Task:**
-        Generate a response in Korean for each active AI character (${activeAICharacters.map(c => c.name).join(', ')}).
-        - **Crucial:** Responses must be deeply in-character and reflect their unique personas and goals.
-        - **Keep responses concise and conversational**, typically 1-3 sentences.
-        - **React directly** to the player's message and the preceding conversation history.
-        - **OUTPUT FORMAT:** For each character, output a single, valid JSON object on its own line, followed by a newline. Do NOT use a JSON array or markdown backticks.
-        
-        **Example Output Format:**
-        {"name": "김대리", "response": "정말요? 저는 몰랐네요."}
-        {"name": "박과장", "response": "이건 분명 계획된 일이야..."}
-
-        **Character-Specific Instructions:**
-        - **If you are the VILLAIN:** Deceive with subtle tactics like misdirection, feigned surprise, or a weak alibi.
-        - **If you are INNOCENT:** Help uncover the truth by asking pointed questions, offering theories, or stating observations.
-    `;
-
-    try {
-        const responseStream = await ai.models.generateContentStream({
-            model: "gemini-2.5-flash",
-            contents: prompt,
-        });
-
-        let buffer = '';
-        for await (const chunk of responseStream) {
-            buffer += chunk.text;
-            let newlineIndex;
-            while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
-                const line = buffer.substring(0, newlineIndex).trim();
-                buffer = buffer.substring(newlineIndex + 1);
-                if (line) {
-                    try {
-                        const parsed = JSON.parse(line);
-                        if (parsed.name && parsed.response) {
-                            yield parsed;
-                        }
-                    } catch (e) {
-                        console.warn("Could not parse JSON line from stream:", line, e);
-                    }
-                }
-            }
-        }
-        if (buffer.trim()) {
+    // Create an array of promises, each one representing an API call for a single character.
+    // The requests are fired off near-simultaneously.
+    const responsePromises = activeAICharacters.map(character => {
+        return (async () => {
+            const prompt = createIndividualPromptFor(character, characters, sabotage, chatHistory, playerCharacterName, userInput);
             try {
-                const parsed = JSON.parse(buffer.trim());
-                 if (parsed.name && parsed.response) {
-                    yield parsed;
-                }
-            } catch (e) {
-                console.warn("Could not parse final JSON from stream buffer:", buffer.trim(), e);
+                const response = await ai.models.generateContent({
+                    model: "gemini-2.5-flash",
+                    contents: prompt,
+                    config: {
+                        // For fast, reactive chat, disabling "thinking" is a key optimization.
+                        thinkingConfig: { thinkingBudget: 0 }
+                    },
+                });
+                return { name: character.name, response: response.text.trim() };
+            } catch (error) {
+                console.error(`Error getting response for ${character.name}:`, error);
+                // Return a fallback response on error to avoid breaking the game flow
+                return { name: character.name, response: "..." };
             }
-        }
+        })();
+    });
 
-    } catch (error) {
-        console.error("Error getting character responses:", error);
-        throw new Error("The AI colleagues are busy with the sabotage and couldn't respond. Please try again.");
+    // Await each promise in the order they were created.
+    // This maintains the one-by-one conversational flow in the UI.
+    for (const promise of responsePromises) {
+        yield await promise;
     }
 };
 
