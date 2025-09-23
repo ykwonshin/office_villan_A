@@ -7,6 +7,7 @@ export interface Character {
   imageUrl: string | null;
   isPlayer?: boolean;
   votes?: number;
+  visualDescription: string;
 }
 
 export interface Message {

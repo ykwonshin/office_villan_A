@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { generateGameSetupText, generatePixelArtImage, getCharacterResponses, getVoteAndConfession } from './services/geminiService';
+import { generateGameSetupText, generatePixelArtImage, getCharacterResponses, getVoteAndConfession, editImageToRemoveCharacter } from './services/geminiService';
 import type { Character, Message, GameState } from './types';
 import CharacterCard from './components/CharacterCard';
 import ChatBubble from './components/ChatBubble';
@@ -32,9 +32,13 @@ const App: React.FC = () => {
     const [error, setError] = useState<string | null>(null);
     const [loadingMessage, setLoadingMessage] = useState<string>(loadingTexts[0]);
     const [revealedCharactersCount, setRevealedCharactersCount] = useState(0);
-
+    const [lineCoords, setLineCoords] = useState<{ start: { x: number, y: number }, end: { x: number, y: number } } | null>(null);
+    const [sceneImageUrl, setSceneImageUrl] = useState<string | null>(null);
 
     const chatEndRef = useRef<HTMLDivElement>(null);
+    const characterPanelRef = useRef<HTMLDivElement>(null);
+    const characterCardRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
+
 
     const scrollToBottom = () => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -61,7 +65,6 @@ const App: React.FC = () => {
     useEffect(() => {
         if (gameState === 'briefing' && characters.length > 0) {
             setRevealedCharactersCount(0);
-            // FIX: Use ReturnType<typeof setTimeout> for browser compatibility instead of NodeJS.Timeout
             const timers: ReturnType<typeof setTimeout>[] = [];
             for (let i = 0; i < characters.length; i++) {
                 const timer = setTimeout(() => {
@@ -88,7 +91,7 @@ const App: React.FC = () => {
             const playerIndex = Math.floor(Math.random() * charactersWithPrompts.length);
             
             const newCharacters: Character[] = charactersWithPrompts.map((c, index) => {
-                const { portraitPrompt, visualDescription, ...restOfChar } = c;
+                const { portraitPrompt, ...restOfChar } = c;
                 return {
                     ...restOfChar,
                     status: 'active',
@@ -122,12 +125,12 @@ const App: React.FC = () => {
             setIsLoading(false); 
 
             // Step 3: Generate images in the background (Slow & Progressive)
-            // Construct the sabotage image prompt on the client-side
             const characterVisuals = charactersWithPrompts.map(c => c.visualDescription).join(', ');
-            const sabotageImagePrompt = `A vibrant, detailed 8-bit pixel art scene of a corporate office break room. A group of cute, chibi-style office workers (${characterVisuals}) are gathered, looking confused and shocked. The scene depicts the aftermath of a sabotage event: "${newSabotage}". The style should be reminiscent of classic RPGs, with expressive characters. No text or letters in the image.`;
+            const sabotageImagePrompt = `A vibrant, detailed 8-bit pixel art scene of a corporate office break room. A group of cute, chibi-style office workers (${characterVisuals}) are gathered, looking confused and shocked. The scene depicts the aftermath of a sabotage event: "${newSabotage}". The style should be reminiscent of classic RPGs, with expressive characters. Crucially, do NOT include any text, letters, or words in the image.`;
 
             generatePixelArtImage(sabotageImagePrompt).then(sabotageImageUrl => {
                 if (sabotageImageUrl) {
+                    setSceneImageUrl(sabotageImageUrl);
                     setMessages(prev => prev.map(msg => 
                         msg.isSpecial ? { ...msg, imageUrl: sabotageImageUrl } : msg
                     ));
@@ -201,7 +204,6 @@ const App: React.FC = () => {
             const seenVoters = new Set<string>();
 
             const validatedAiVotes = aiVotes.filter((vote: { voter: string; votedFor: string }) => {
-                // Ensure the voter is an active AI and hasn't voted yet
                 if (activeAiVoters.has(vote.voter) && !seenVoters.has(vote.voter)) {
                     seenVoters.add(vote.voter);
                     return true;
@@ -213,13 +215,38 @@ const App: React.FC = () => {
 
             const currentTally: { [key: string]: number } = {};
             characters.forEach(c => { currentTally[c.name] = 0; });
+
+            const characterPanel = characterPanelRef.current;
+            if (!characterPanel) return;
+            const panelRect = characterPanel.getBoundingClientRect();
             
-            // Simulate vote reveal with correct animation
             for (const vote of allVotes) {
-                await new Promise(res => setTimeout(res, 600));
+                const voterCardEl = characterCardRefs.current[vote.voter];
+                const votedForCardEl = characterCardRefs.current[vote.votedFor];
+
+                 if (voterCardEl && votedForCardEl) {
+                    const voterRect = voterCardEl.getBoundingClientRect();
+                    const votedForRect = votedForCardEl.getBoundingClientRect();
+
+                    const start = {
+                        x: voterRect.left + voterRect.width / 2 - panelRect.left + characterPanel.scrollLeft,
+                        y: voterRect.top + voterRect.height / 2 - panelRect.top + characterPanel.scrollTop,
+                    };
+                    const end = {
+                        x: votedForRect.left + votedForRect.width / 2 - panelRect.left + characterPanel.scrollLeft,
+                        y: votedForRect.top + votedForRect.height / 2 - panelRect.top + characterPanel.scrollTop,
+                    };
+                    setLineCoords({ start, end });
+                }
+
+                await new Promise(res => setTimeout(res, 800));
+
                 currentTally[vote.votedFor] = (currentTally[vote.votedFor] || 0) + 1;
                 setCharacters(prev => prev.map(c => ({...c, votes: currentTally[c.name] || 0 })));
                 setMessages(prev => [...prev, { sender: 'system', text: `${vote.voter}님이 ${vote.votedFor}님을 지목했습니다.` }]);
+                
+                setLineCoords(null);
+                await new Promise(res => setTimeout(res, 200));
             }
             
             await new Promise(res => setTimeout(res, 1500));
@@ -254,6 +281,18 @@ const App: React.FC = () => {
                 setCharacters(prev => prev.map(c => c.name === votedOutName ? { ...c, status: 'voted_out' } : c));
                 setMessages(prev => [...prev, { sender: 'system', text: `투표 결과, ${votedOutName}님이 가장 많은 표를 받아 해고되었습니다...` }]);
                 
+                if (sceneImageUrl && votedOutCharacter.visualDescription) {
+                    editImageToRemoveCharacter(sceneImageUrl, votedOutCharacter.visualDescription)
+                        .then(newImageUrl => {
+                            if (newImageUrl) {
+                                setSceneImageUrl(newImageUrl);
+                                setMessages(prev => prev.map(msg => 
+                                    msg.isSpecial ? { ...msg, imageUrl: newImageUrl } : msg
+                                ));
+                            }
+                        });
+                }
+
                 await new Promise(res => setTimeout(res, 2000));
                 
                 const wasVillainCaught = votedOutCharacter.isVillain;
@@ -284,7 +323,7 @@ const App: React.FC = () => {
                         return;
                     }
 
-                    const remainingCount = characters.filter(c => c.status === 'active').length - 1; // -1 for the person just voted out
+                    const remainingCount = characters.filter(c => c.status === 'active').length - 1;
 
                     if (remainingCount <= 2) {
                         // --- LOSS CONDITION: 1v1 REACHED ---
@@ -339,6 +378,7 @@ const App: React.FC = () => {
         setError(null);
         setPlayerCharacter(null);
         setSabotage('');
+        setSceneImageUrl(null);
     };
 
     const renderGameState = () => {
@@ -403,12 +443,13 @@ const App: React.FC = () => {
                     <div className="flex flex-row h-full w-full gap-4 p-4">
                         {(gameState === 'game_over_win' || gameState === 'game_over_loss') && <GameOverAnimations gameState={gameState} />}
                         {/* Left Panel: Characters */}
-                        <div className="w-1/3 lg:w-1/4 bg-white p-4 rounded-xl shadow-lg overflow-y-auto">
+                        <div ref={characterPanelRef} className="w-1/3 lg:w-1/4 bg-white p-4 rounded-xl shadow-lg overflow-y-auto relative">
                             <h2 className="text-xl font-bold text-slate-800 mb-4 border-b-2 border-slate-300 pb-2">팀원 목록</h2>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 {characters.map(char => (
                                     <CharacterCard 
                                         key={char.name} 
+                                        ref={el => { characterCardRefs.current[char.name] = el; }}
                                         character={char} 
                                         onVote={handlePlayerVote}
                                         isVotingPhase={gameState === 'voting'}
@@ -416,6 +457,22 @@ const App: React.FC = () => {
                                     />
                                 ))}
                             </div>
+                             {lineCoords && (
+                                <svg className="absolute top-0 left-0 w-full h-full pointer-events-none z-10">
+                                    <defs>
+                                        <marker id="arrowhead" markerWidth="5" markerHeight="3.5" refX="5" refY="1.75" orient="auto">
+                                            <polygon points="0 0, 5 1.75, 0 3.5" className="fill-red-500" />
+                                        </marker>
+                                    </defs>
+                                    <line
+                                        x1={lineCoords.start.x} y1={lineCoords.start.y}
+                                        x2={lineCoords.end.x} y2={lineCoords.end.y}
+                                        className="stroke-red-500 line-anim"
+                                        strokeWidth="3"
+                                        markerEnd="url(#arrowhead)"
+                                    />
+                                </svg>
+                            )}
                         </div>
 
                         {/* Right Panel: Chat */}
@@ -478,6 +535,16 @@ const App: React.FC = () => {
                 }
                 .animate-fade-in-up {
                     animation: fade-in-up 0.4s ease-out forwards;
+                }
+                .line-anim {
+                    stroke-dasharray: 1000;
+                    stroke-dashoffset: 1000;
+                    animation: draw-line 0.6s ease-out forwards;
+                }
+                @keyframes draw-line {
+                    to {
+                        stroke-dashoffset: 0;
+                    }
                 }
             `}</style>
             <div className="h-full bg-slate-50 rounded-2xl shadow-2xl shadow-slate-300/50 flex justify-center items-center">

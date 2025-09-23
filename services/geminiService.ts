@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, Modality } from "@google/genai";
 import type { Character, Message } from '../types';
 
 if (!process.env.API_KEY) {
@@ -63,7 +63,7 @@ const voteAndConfessionSchema = {
 };
 
 export const generateGameSetupText = async (): Promise<{
-    characters: (Omit<Character, 'status' | 'isPlayer' | 'votes' | 'imageUrl' | 'isVillain'> & { isVillain: boolean; portraitPrompt: string; visualDescription: string; })[];
+    characters: (Omit<Character, 'status' | 'isPlayer' | 'votes' | 'imageUrl'> & { isVillain: boolean; portraitPrompt: string; })[];
     sabotage: string;
 }> => {
     try {
@@ -133,6 +133,49 @@ export const generatePixelArtImage = async (prompt: string): Promise<string | nu
         return `data:image/png;base64,${base64ImageBytes}`;
     } catch (imageError) {
         console.warn("Could not generate a pixel art image, likely due to API quota. Continuing without it.", imageError);
+        return null;
+    }
+};
+
+export const editImageToRemoveCharacter = async (base64ImageDataWithPrefix: string, characterDescription: string): Promise<string | null> => {
+    if (!base64ImageDataWithPrefix || !characterDescription) return null;
+    try {
+        const [prefix, base64Data] = base64ImageDataWithPrefix.split(',');
+        if (!prefix || !base64Data) {
+            throw new Error("Invalid base64 data URL format.");
+        }
+        const mimeType = prefix.match(/:(.*?);/)?.[1] || 'image/png';
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image-preview',
+            contents: {
+                parts: [
+                    {
+                        inlineData: {
+                            data: base64Data,
+                            mimeType: mimeType,
+                        },
+                    },
+                    {
+                        text: `Remove the character best described as "${characterDescription}" from this image. Do not change anything else.`,
+                    },
+                ],
+            },
+            config: {
+                responseModalities: [Modality.IMAGE, Modality.TEXT],
+            },
+        });
+        
+        for (const part of response.candidates[0].content.parts) {
+            if (part.inlineData) {
+                const base64ImageBytes: string = part.inlineData.data;
+                return `data:${part.inlineData.mimeType};base64,${base64ImageBytes}`;
+            }
+        }
+        return null;
+
+    } catch (error) {
+        console.warn("Could not edit image to remove character.", error);
         return null;
     }
 };
